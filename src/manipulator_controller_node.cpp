@@ -247,13 +247,13 @@ private:
     void enable_timers(bool enable) {
         if (enable) {
             if (joint_state_timer_->is_canceled()) {
-                RCLCPP_INFO(this->get_logger(), "Enabling odometry and control timers.");
+                RCLCPP_INFO(this->get_logger(), "Enabling joint state and control timers.");
                 joint_state_timer_->reset();
                 controller_timer_->reset();
             }
         } else {
             if (!joint_state_timer_->is_canceled()) {
-                RCLCPP_WARN(this->get_logger(), "Disabling odometry and control timers.");
+                RCLCPP_WARN(this->get_logger(), "Disabling joint state and control timers.");
                 joint_state_timer_->cancel();
                 controller_timer_->cancel();
             }
