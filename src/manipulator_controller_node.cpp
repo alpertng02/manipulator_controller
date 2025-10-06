@@ -50,6 +50,8 @@ public:
         manipulator_joint_states_.velocity.resize(jointCount);
         for (size_t i = 0; i < manipulator_joint_names_.size(); i++) {
             manipulator_joint_states_.name[i] = manipulator_joint_names_[i];
+            manipulator_joint_states_.position[i] = 0.0;
+            manipulator_joint_states_.velocity[i] = 0.0;
         }
 
         // Initialize timers but keep them disabled
@@ -108,12 +110,10 @@ private:
     std::vector<double> joint_min_pos_boundaries_rads_ { -M_PI, -M_PI, -M_PI };
     std::vector<double> joint_max_pos_boundaries_rads_ { M_PI, M_PI, M_PI };
 
-    double wheel_separation_ = 1.0;
-    double wheel_radius_ = 0.1;
     std::vector<double> joint_reductions_ { 50.0, 68.18181818, 2.0 };
     std::vector<double> joint_steps_per_revolutions_ { 51200.0, 51200.0, 51200.0 };
 
-    bool use_joint_trajectories_ { true };
+    bool use_joint_trajectories_ { false };
 
     double joint_deacceleration_ratio_ { 0.8f };
 
@@ -137,9 +137,9 @@ private:
     double max_pwm_dutycycle_ { 80.0 };
     double velocity_filter_cutoff_hz_ { 100.0 };
 
-    double pid_kp_ { 1.0 };
-    double pid_ki_ { 0.01 };
-    double pid_kd_ { 0.0001 };
+    double pid_kp_ { 0.0 };
+    double pid_ki_ { 0.00 };
+    double pid_kd_ { 0.0000 };
 
     double pid_p_bound_ { 10000.0f };
     double pid_i_bound_ { 5000.0f };
