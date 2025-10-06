@@ -114,8 +114,6 @@ private:
     std::vector<double> joint_steps_per_revolutions_ { 20000.0, 12800.0, 51200.0 };
     static constexpr double stepper_max_velocity_steps_ { 200000.0 };
 
-    bool use_joint_trajectories_ { false };
-
     double joint_deacceleration_ratio_ { 0.8f };
 
     std::vector<double> joint_max_acc_jerks_rads_ { 10.0f, 10.0f, 10.0f };
@@ -163,6 +161,7 @@ private:
     rclcpp::Time prev_joint_states_time_ { this->get_clock()->now() };
     rclcpp::Time prev_log_time_ { this->get_clock()->now() };
     trajectory_msgs::msg::JointTrajectory joint_trajectory_;
+    trajectory_msgs::msg::JointTrajectory prev_joint_trajectory_;
 
     ManipulatorFeedbackPacket feedback_ {};
 
@@ -350,85 +349,41 @@ private:
 
             std::vector<double> joint_velocities_rads { point.velocities.begin(), point.velocities.begin() + 3 };
             std::vector<double> joint_velocities_steps { joint_rads_to_steps(joint_velocities_rads) };
+            std::vector<double> joint_accelerations_rads { point.accelerations.begin(), point.accelerations.begin() + 3 };
+            std::vector<double> joint_accelerations_steps { joint_rads_to_steps(joint_accelerations_rads) };
 
             std::vector<double> gripper_duties { point.velocities.begin() + 3, point.velocities.begin() + 6 };
             // Only send command if we have 3 joints
             bool res = true;
-            if (use_joint_trajectories_) {
 
-                std::vector<double> joint_positions_rads { point.positions };
-                std::vector<double> joint_accelerations_rads { point.accelerations };
-
-                std::vector<double> joint_positions_steps { joint_rads_to_steps(joint_positions_rads) };
-                std::vector<double> joint_accelerations_steps { joint_rads_to_steps(joint_accelerations_rads) };
-                std::vector<double> joint_acc_jerks_steps { joint_rads_to_steps(joint_max_acc_jerks_rads_) };
-                std::vector<double> joint_dec_jerks_steps { joint_rads_to_steps(joint_max_dec_jerks_rads_) };
+            std::array<float, 3> velocities { static_cast<float>(joint_velocities_steps[0]),
+                static_cast<float>(joint_velocities_steps[1]),
+                static_cast<float>(joint_velocities_steps[2]) };
 
 
-                std::array<int32_t, 3> positions { static_cast<int32_t>(lround(joint_positions_steps[0])),
-                    static_cast<int32_t>(lround(joint_positions_steps[1])),
-                    static_cast<int32_t>(lround(joint_positions_steps[2])) };
-
-                std::array<float, 3> velocities { static_cast<float>(joint_velocities_steps[0]),
-                    static_cast<float>(joint_velocities_steps[1]),
-                    static_cast<float>(joint_velocities_steps[2]) };
-
-                std::array<float, 3> final_velocities {};
-                for (size_t i = 0; i < velocities.size(); i++) {
-                    velocities[i] = std::clamp(velocities[i], -
-                        static_cast<float>(stepper_max_velocity_steps_),
-                        static_cast<float>(stepper_max_velocity_steps_));
-                    
-                    if (velocities[i] == 0.0f) {
-                        final_velocities[i] = 0.0f;
-                        velocities[i] = prev_velocities[i];
-                    } else {
-                        final_velocities[i] = velocities[i];
-                    }
-
-                    prev_velocities[i] = velocities[i];
+            for (size_t i = 0; i < joint_accelerations_steps.size(); i++) {
+                double max_velocity_change = joint_accelerations_steps[i] / command_publish_rate_hz_;
+                if (velocities[i] > prev_velocities[i] + max_velocity_change) {
+                    velocities[i] = prev_velocities[i] + max_velocity_change;
+                } else if (velocities[i] < prev_velocities[i] - max_velocity_change) {
+                    velocities[i] = prev_velocities[i] - max_velocity_change;
                 }
-
-                std::array<float, 3> accelerations { static_cast<float>(joint_accelerations_steps[0]),
-                    static_cast<float>(joint_accelerations_steps[1]),
-                    static_cast<float>(joint_accelerations_steps[2]) };
-
-                std::array<float, 3> deaccelerations { static_cast<float>(joint_deacceleration_ratio_) * accelerations[0],
-                    static_cast<float>(joint_deacceleration_ratio_) * accelerations[1],
-                    static_cast<float>(joint_deacceleration_ratio_) * accelerations[2] };
-
-                std::array<float, 3> acc_jerks { static_cast<float>(joint_acc_jerks_steps[0]),
-                    static_cast<float>(joint_acc_jerks_steps[1]),
-                    static_cast<float>(joint_acc_jerks_steps[2]) };
-
-                std::array<float, 3> dec_jerks { static_cast<float>(joint_dec_jerks_steps[0]),
-                    static_cast<float>(joint_dec_jerks_steps[1]),
-                    static_cast<float>(joint_dec_jerks_steps[2]) };
-
-
-                res &= protocol_->set_joint_trajectories(
-                    positions,
-                    velocities,
-                    final_velocities,  // final velocities, could be separate if needed
-                    accelerations,
-                    deaccelerations, // deaccelerations, could be separate
-                    acc_jerks,
-                    dec_jerks
-                );
-            } else {
-
-                std::array<float, 3> velocities { static_cast<float>(joint_velocities_steps[0]),
-                    static_cast<float>(joint_velocities_steps[1]),
-                    static_cast<float>(joint_velocities_steps[2]) };
-
-                for (size_t i = 0; i < velocities.size(); i++) {
-                    velocities[i] = std::clamp(velocities[i], -
-                        static_cast<float>(stepper_max_velocity_steps_),
-                        static_cast<float>(stepper_max_velocity_steps_));
-                }
-
-                res &= protocol_->set_joint_velocities(velocities);
             }
+
+            for (size_t i = 0; i < velocities.size(); i++) {
+                velocities[i] = std::clamp(velocities[i],
+                    -static_cast<float>(stepper_max_velocity_steps_),
+                    static_cast<float>(stepper_max_velocity_steps_));
+            }
+
+            for (size_t i = 0; i < prev_velocities.size(); i++) {
+                prev_velocities[i] = velocities[i];
+            }
+
+            res &= protocol_->set_joint_velocities(velocities);
+
+            prev_joint_trajectory_ = joint_trajectory_;
+
             std::array<float, 3> duties { static_cast<float>(gripper_duties[0]),
                 static_cast<float>(gripper_duties[1]),
                 static_cast<float>(gripper_duties[2]) };
