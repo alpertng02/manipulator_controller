@@ -273,6 +273,9 @@ private:
             if (communication_established_) {
                 RCLCPP_ERROR(this->get_logger(), "Device connection lost. Trying to reconnect to %s", device_.c_str());
                 communication_established_ = false;
+                for (size_t i = 0; i < joint_initial_positions_rads_.size(); i++) {
+                    joint_initial_positions_rads_[i] = manipulator_joint_states_.position[i];
+                }
             }
 
             enable_timers(false);
