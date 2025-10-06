@@ -111,7 +111,8 @@ private:
     std::vector<double> joint_max_pos_boundaries_rads_ { M_PI, M_PI, M_PI };
 
     std::vector<double> joint_reductions_ { 50.0, 68.18181818, 2.0 };
-    std::vector<double> joint_steps_per_revolutions_ { 51200.0, 51200.0, 51200.0 };
+    std::vector<double> joint_steps_per_revolutions_ { 20000.0, 12800.0, 51200.0 };
+    static constexpr double stepper_max_velocity_steps_ { 200000.0 };
 
     bool use_joint_trajectories_ { false };
 
@@ -374,12 +375,17 @@ private:
 
                 std::array<float, 3> final_velocities {};
                 for (size_t i = 0; i < velocities.size(); i++) {
+                    velocities[i] = std::clamp(velocities[i], -
+                        static_cast<float>(stepper_max_velocity_steps_),
+                        static_cast<float>(stepper_max_velocity_steps_));
+                    
                     if (velocities[i] == 0.0f) {
                         final_velocities[i] = 0.0f;
                         velocities[i] = prev_velocities[i];
                     } else {
                         final_velocities[i] = velocities[i];
                     }
+
                     prev_velocities[i] = velocities[i];
                 }
 
@@ -414,6 +420,12 @@ private:
                 std::array<float, 3> velocities { static_cast<float>(joint_velocities_steps[0]),
                     static_cast<float>(joint_velocities_steps[1]),
                     static_cast<float>(joint_velocities_steps[2]) };
+
+                for (size_t i = 0; i < velocities.size(); i++) {
+                    velocities[i] = std::clamp(velocities[i], -
+                        static_cast<float>(stepper_max_velocity_steps_),
+                        static_cast<float>(stepper_max_velocity_steps_));
+                }
 
                 res &= protocol_->set_joint_velocities(velocities);
             }
