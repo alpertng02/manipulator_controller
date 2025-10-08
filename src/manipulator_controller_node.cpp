@@ -535,6 +535,9 @@ private:
         joint_min_pos_boundaries_rads_ = this->declare_parameter("joint_min_pos_boundaries", joint_min_pos_boundaries_rads_);
         joint_max_pos_boundaries_rads_ = this->declare_parameter("joint_max_pos_boundaries", joint_max_pos_boundaries_rads_);
 
+        joint_reductions_ = this->declare_parameter("joint_reductions", joint_reductions_);
+        joint_steps_per_revolutions_ = this->declare_parameter("joint_steps_per_revolutions", joint_steps_per_revolutions_);
+
         joint_deacceleration_ratio_ = this->declare_parameter("joint_deacceleration_ratio", joint_deacceleration_ratio_);
 
         joint_max_acc_jerks_rads_ = this->declare_parameter("joint_max_acc_jerks", joint_max_acc_jerks_rads_);
