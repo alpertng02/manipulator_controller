@@ -9,10 +9,13 @@
  *
  */
 
-#include "usb_protocol.hpp"
+#include "usb_device.hpp"
 #include <vector>
 
-bool UsbProtocol::open(const std::string& port) {
+UsbManipulatorDevice::UsbManipulatorDevice() = default;
+
+
+bool UsbManipulatorDevice::open(const std::string& port) {
     char errorOpening = serial_.openDevice(port.c_str(), 115200);
     if (errorOpening != 1) {
         is_open_ = false;
@@ -22,11 +25,11 @@ bool UsbProtocol::open(const std::string& port) {
     return is_open_;
 }
 
-bool UsbProtocol::is_open() {
+bool UsbManipulatorDevice::is_open() {
     return serial_.isDeviceOpen() && is_open_;
 }
 
-std::vector<std::string> UsbProtocol::list_all_devices() {
+std::vector<std::string> UsbManipulatorDevice::list_all_devices() {
     std::vector<std::string> all_devices {};
 
     char device_name[32] = { 0 };
@@ -56,7 +59,7 @@ std::vector<std::string> UsbProtocol::list_all_devices() {
 }
 
 
-int UsbProtocol::write_bytes(void* buffer, const unsigned int n_bytes) {
+int UsbManipulatorDevice::write_bytes(void* buffer, const unsigned int n_bytes) {
     unsigned num_bytes = 0;
     int ret = serial_.writeBytes(buffer, n_bytes, &num_bytes);
     if (ret == 1) {
@@ -68,7 +71,7 @@ int UsbProtocol::write_bytes(void* buffer, const unsigned int n_bytes) {
     }
 }
 
-int UsbProtocol::read_bytes(void* buffer, int max_length, std::chrono::milliseconds timeout) {
+int UsbManipulatorDevice::read_bytes(void* buffer, int max_length, std::chrono::milliseconds timeout) {
     int ret = serial_.readBytes(buffer, max_length, timeout.count());
     if (ret >= 0) {
         return ret;
@@ -77,12 +80,12 @@ int UsbProtocol::read_bytes(void* buffer, int max_length, std::chrono::milliseco
     }
 }
 
-void UsbProtocol::close() {
+void UsbManipulatorDevice::close() {
     serial_.closeDevice();
     is_open_ = false;
 }
 
 
-UsbProtocol::~UsbProtocol() {
+UsbManipulatorDevice::~UsbManipulatorDevice() {
     close();
 }

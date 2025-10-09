@@ -6,194 +6,118 @@ extern "C" {
 #endif
 
 #include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
 
-#define MANIPULATOR_FRAME_START		(0x6675636B)
-#define MANIPULATOR_FRAME_END		(0x676F6F6E)
+#include "manipulator_packet_types.h"
 
-#define MANIPULATOR_DEVICE_ID		(0x706F726E)	
 
-	typedef enum {
-		set_joint_velocity = 0,
+    /* ==============================
+     * API
+     * ============================== */
 
-		set_joint_trajectory = 1,
+     /* --- Serialization helpers --- */
+    uint16_t manipulator_next_sequence(void);
+    uint32_t manipulator_crc32(const void* data, size_t len);
 
-		set_gripper_duties = 2,
+    /* --- Building packets --- */
+    size_t manipulator_packet_header_size(void);
 
-		set_joint_current_pos = 3,
+    size_t manipulator_packet_enable_size(void);
+    size_t manipulator_packet_joint_floats_size(void);
+    size_t manipulator_packet_gripper_floats_size(void);
 
-		set_joint_pos_boundaries = 4,
+    size_t manipulator_packet_size_for_request(void);
+    size_t manipulator_packet_size_for_joint_velocities(void);
+    size_t manipulator_packet_size_for_gripper_duties(void);
+    size_t manipulator_packet_size_for_joint_trajectories(uint32_t point_count);
+    size_t manipulator_packet_size_for_init(void);
+    size_t manipulator_packet_size_for_device_state(void);
+    size_t manipulator_packet_size_for_feedback(void);
 
-		set_lowpass_fc = 5,
-		set_pid_params = 6,
-		set_pid_bounds = 7,
 
-		set_ff_params = 8,
+    /* --- Packing --- */
+    bool manipulator_pack_joint_velocities_packet(uint8_t* buf, size_t buf_size,
+        uint64_t time_since_boot_us,
+        const float velocities[MANIPULATOR_JOINT_MOTOR_COUNT]);
 
-		set_gripper_max_duty = 9,
+    bool manipulator_pack_joint_trajectories_packet(uint8_t* buf, size_t buf_size,
+        uint64_t time_since_boot_us,
+        uint32_t point_count,
+        const JointTrajectoryPoint* points);
 
-		set_feedback_hz = 11,
-		set_control_hz = 12,
+    bool manipulator_pack_gripper_duties_packet(uint8_t* buf, size_t buf_size,
+        uint64_t time_since_boot_us,
+        const float duties[MANIPULATOR_GRIPPER_MOTOR_COUNT]);
 
-		running_mode_enable = 13,
-		init_mode_enable = 14,
-		send_device_state = 15
+    bool manipulator_pack_init_packet(uint8_t* buf, size_t buf_size,
+        uint64_t time_since_boot_us,
+        const ManipulatorInitPacket* init);
 
-	} ManipulatorCommands;
+    bool manipulator_pack_enable_packet(uint8_t* buf, size_t buf_size,
+        uint64_t time_since_boot_us, ManipulatorCommands command, bool enable);
 
-#pragma pack(push, 1)
-	typedef struct {
-		uint32_t frame_start;
+    bool manipulator_pack_request_device_state_packet(uint8_t* buf, size_t buf_size,
+        uint64_t time_since_boot_us);
 
-		uint32_t overwrite_pinout;
+    bool manipulator_pack_request_feedback_packet(uint8_t* buf, size_t buf_size,
+        uint64_t time_since_boot_us);
 
-		uint8_t joint_dir_pins[3];
-		uint8_t joint_pul_pins[3];
+    bool manipulator_pack_device_state_packet(uint8_t* buf, size_t buf_size,
+        uint64_t time_since_boot_us,
+        const ManipulatorDeviceState* state);
 
-		uint8_t gripper_lpwm_pins[3];
-		uint8_t gripper_rpwm_pins[3];
+    bool manipulator_pack_feedback_packet(uint8_t* buf, size_t buf_size,
+        uint64_t time_since_boot_us,
+        const ManipulatorFeedback* feedback);
 
-		uint8_t joint_swap_dirs[3];
-		uint8_t gripper_swap_dirs[3];
+    /* --- Unpacking --- */
 
-		int32_t joint_initial_pos[3];
+    bool manipulator_unpack_packet_header(const uint8_t* buf, size_t buf_size,
+        ManipulatorPacketHeader* out_header);
 
-		int32_t max_joint_pos_boundaries[3];
-		int32_t min_joint_pos_boundaries[3];
+    /* --- Unpacking Payloads --- */
 
-		float max_dutycycle;
-		float lowpass_fc;
-		float kp;
-		float ki;
-		float kd;
-		float p_bound;
-		float i_bound;
-		float d_bound;
+    bool manipulator_unpack_joint_velocities_from_payload(const uint8_t* payload, size_t payload_size,
+        float out_velocities[MANIPULATOR_JOINT_MOTOR_COUNT]);
 
-		float kv;
-		float ka;
-		float kj;
+    const JointTrajectoryPoint* manipulator_unpack_joint_trajectories_from_payload(
+        const uint8_t* payload, size_t payload_size, uint32_t* out_point_count);
 
-		float feedback_hz;
-		float control_hz;
+    bool manipulator_unpack_gripper_duties_from_payload(const uint8_t* payload, size_t payload_size,
+        float out_duties[MANIPULATOR_GRIPPER_MOTOR_COUNT]);
 
-		uint16_t padding;
+    bool manipulator_unpack_init_packet_from_payload(const uint8_t* payload, size_t payload_size,
+        ManipulatorInitPacket* out_init);
 
-		uint32_t frame_end;
-	} ManipulatorInitPacket;
-#pragma pack(pop)
+    bool manipulator_unpack_enable_from_payload(const uint8_t* payload, size_t payload_size,
+        bool* out_enable);
 
-#pragma pack(push, 1)
-	typedef struct {
+    bool manipulator_unpack_device_state_packet_from_payload(const uint8_t* payload, size_t payload_size,
+        ManipulatorDeviceState* out_state);
 
-		union {
-			// 1. Joint velocity commands
-			struct {
-				float velocities[3];
-			} joint_velocity;
+    bool manipulator_unpack_feedback_packet_from_payload(const uint8_t* payload, size_t payload_size,
+        ManipulatorFeedback* out_feedback);
 
-			// 2. Joint control commands
-			struct {
-				int32_t target_positions[3];
-				float maximum_velocities[3];
-				float final_velocities[3];
-				float accelerations[3];
-				float deaccelerations[3];
-				float acc_jerks[3];
-				float dec_jerks[3];
-			} joint_trajectory;
+    /* --- Unpacking Packets --- */
 
-			// 3. Gripper duty control
-			struct {
-				float gripper_duties[3];
-			} gripper_duty;
+    bool unpack_joint_velocities_from_packet(const uint8_t* buf, size_t buf_size,
+        float out_velocities[MANIPULATOR_JOINT_MOTOR_COUNT],
+        ManipulatorPacketHeader* out_header);
 
-			struct {
-				int32_t min_pos[3];
-				int32_t max_pos[3];
-			} joint_pos_boundaries;
+    const JointTrajectoryPoint* unpack_joint_trajectories_from_packet(const uint8_t* buf, size_t buf_size,
+        uint32_t* out_point_count,
+        ManipulatorPacketHeader* out_header);
 
-			struct {
-				int32_t current_pos[3];
-			} joint_current_pos;
+    bool unpack_gripper_duties_from_packet(const uint8_t* buf, size_t buf_size,
+        float out_duties[MANIPULATOR_GRIPPER_MOTOR_COUNT],
+        ManipulatorPacketHeader* out_header);
 
-			// 4. PID parameters
-			struct {
-				float kp;
-				float ki;
-				float kd;
-			} pid_params;
+    bool unpack_manipulator_init_packet(const uint8_t* buf, size_t buf_size,
+        ManipulatorInitPacket* out_init,
+        ManipulatorPacketHeader* out_header);
 
-			// 5. PID bounds
-			struct {
-				float p_bound;
-				float i_bound;
-				float d_bound;
-			} pid_bounds;
 
-			// 6. Feedforward parameters
-			struct {
-				float ff_vel_gain;
-				float ff_acc_gain;
-				float ff_jerk_gain;
-			} ff_params;
-
-			// 7. Lowpass filter cutoff frequency
-			struct {
-				float lowpass_fc;
-			} lowpass;
-
-			// 9. Feedback frequency
-			struct {
-				float feedback_hz;
-			} feedback_hz;
-
-			// 10. Control frequency
-			struct {
-				float control_hz;
-			} control_hz;
-			
-			// 11. Mode commands (booleans or enable flags)
-			struct {
-				uint8_t enable;
-			} mode_enable;
-
-		};
-
-	} ManipulatorCommandContents;
-#pragma pack(pop)
-
-#pragma pack(push, 1)
-	typedef struct {
-		uint32_t frame_start;
-		int32_t command_id;
-
-		ManipulatorCommandContents content;
-
-		uint32_t frame_end;
-	} ManipulatorCommandPacket;
-#pragma pack(pop)
-
-#pragma pack(push, 1)
-	typedef struct {
-		uint32_t frame_start;
-		int32_t joint_positions[3];
-		float joint_velocities[3];
-		float gripper_pwm_duties[3];
-		uint32_t frame_end;
-	} ManipulatorFeedbackPacket;
-#pragma pack(pop)
-
-#pragma pack(push, 1)
-	typedef struct {
-		uint32_t frame_start;
-
-		uint32_t device_id;
-		uint16_t is_running;
-		uint16_t init_mode_enabled;
-
-		uint32_t frame_end;
-	} ManipulatorStatePacket;
-#pragma pack(pop)
 
 #ifdef __cplusplus
 }

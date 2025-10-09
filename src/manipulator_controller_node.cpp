@@ -23,9 +23,8 @@
 #include "sensor_msgs/msg/joint_state.hpp"
 #include "trajectory_msgs/msg/joint_trajectory.hpp"
 
-#include "manipulator_packets.h"
-#include "icommunication_protocol.hpp"
-#include "usb_protocol.hpp"
+#include "manipulator_packets.hpp"
+#include "usb_device.hpp"
 
 class ManipulatorControlNode : public rclcpp::Node {
 
@@ -35,11 +34,10 @@ public:
         init_parameters();
 
         joint_trajectory_subscriber_ = this->create_subscription<trajectory_msgs::msg::JointTrajectory>(joint_trajectory_topic_,
-            rclcpp::QoS(rclcpp::QoSInitialization::from_rmw(rmw_qos_profile_sensor_data)),
-            std::bind(&ManipulatorControlNode::joint_trajectory_callback, this, std::placeholders::_1));
+            rclcpp::SensorDataQoS(), std::bind(&ManipulatorControlNode::joint_trajectory_callback, this, std::placeholders::_1));
 
         jointStatePublisher_ = this->create_publisher<sensor_msgs::msg::JointState>(joint_states_topic_,
-            rclcpp::QoS(rclcpp::QoSInitialization::from_rmw(rmw_qos_profile_system_default)));
+            rclcpp::SystemDefaultsQoS());
 
         size_t jointCount = manipulator_joint_names_.size();
         manipulator_joint_states_.name.reserve(jointCount);
@@ -66,28 +64,26 @@ public:
         controller_timer_->cancel();
 
         if (protocol_type_ == "usb") {
-            protocol_ = std::make_unique<UsbProtocol>();
+            device_ = std::make_unique<UsbManipulatorDevice>();
         } else {
             RCLCPP_FATAL(this->get_logger(), "Unsupported protocol: %s", protocol_type_.c_str());
             throw std::runtime_error("Unsupported protocol");
         }
-        communication_timer_ = this->create_wall_timer(
-            std::chrono::milliseconds(static_cast<int64_t>(1000.0 / feedback_rate_hz_)),
-            std::bind(&ManipulatorControlNode::communication_loop, this));
+
+        reconnection_timer_ = this->create_wall_timer(
+            std::chrono::duration<double, std::milli>(1000.0),
+            std::bind(&ManipulatorControlNode::reconnect_device, this));
 
     }
 private:
 
-
-    std::unique_ptr<ICommunicationProtocol> protocol_;
-
-    ManipulatorFeedbackPacket latest_feedback_ {};
+    std::unique_ptr<IManipulatorDevice> device_;
 
     rclcpp::Subscription<trajectory_msgs::msg::JointTrajectory>::SharedPtr joint_trajectory_subscriber_ {};
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr jointStatePublisher_ {};
     rclcpp::TimerBase::SharedPtr joint_state_timer_ {};
     rclcpp::TimerBase::SharedPtr controller_timer_ {};
-    rclcpp::TimerBase::SharedPtr communication_timer_ {};
+    rclcpp::TimerBase::SharedPtr reconnection_timer_ {};
 
     sensor_msgs::msg::JointState manipulator_joint_states_ {};
 
@@ -155,7 +151,7 @@ private:
     double joint_trajectory_timeout_sec_ = 0.5;
 
     int64_t device_id_ { MANIPULATOR_DEVICE_ID };
-    std::string device_ { "/dev/ttyACM0" };
+    std::string device_bus_ { "/dev/ttyACM0" };
 
     rclcpp::Time prev_joint_trajectory_time_ { this->get_clock()->now() };
     rclcpp::Time prev_joint_states_time_ { this->get_clock()->now() };
@@ -163,86 +159,8 @@ private:
     trajectory_msgs::msg::JointTrajectory joint_trajectory_;
     trajectory_msgs::msg::JointTrajectory prev_joint_trajectory_;
 
-    ManipulatorFeedbackPacket feedback_ {};
+    manipulator::packets::Feedback feedback_ {};
 
-    bool connection_log_occurred_ = false;
-    bool connect_to_device(uint32_t device_id) {
-        if (!connection_log_occurred_) {
-            RCLCPP_INFO(this->get_logger(), "Listing all available devices: ");
-        }
-        auto available_devices = protocol_->list_all_devices();
-
-        if (available_devices.empty()) {
-            if (!connection_log_occurred_) {
-                RCLCPP_ERROR(this->get_logger(), "No devices available");
-            }
-        }
-        for (const auto& device : available_devices) {
-            RCLCPP_INFO(this->get_logger(), "\t%s", device.c_str());
-        }
-
-        ManipulatorStatePacket state_packet {};
-        bool res = false;
-        for (const auto& device : available_devices) {
-
-            protocol_->close();
-            res = protocol_->open(device);
-            if (res) {
-                RCLCPP_INFO(this->get_logger(), "Connected to %s", device.c_str());
-                rclcpp::sleep_for(std::chrono::milliseconds(10));
-                RCLCPP_INFO(this->get_logger(), "Requesting Device ID");
-                res = protocol_->request_device_state();
-                if (res) {
-                    RCLCPP_INFO(this->get_logger(), "Device ID Requested");
-                    res = protocol_->receive_state_feedback(&state_packet, std::chrono::milliseconds(10));
-                    if (!res) {
-                        RCLCPP_ERROR(this->get_logger(), "Device did not send ID.");
-                        res = protocol_->receive_motor_feedback(&feedback_, std::chrono::milliseconds(10));
-                        if (res) {
-                            RCLCPP_INFO(this->get_logger(), "Device is already running");
-                            res = protocol_->set_init_mode_enabled(true);
-                            if (res) {
-                                RCLCPP_INFO(this->get_logger(), "Init mode enabled");
-                                res = init_arm_controller();
-                                connection_log_occurred_ = false;
-                            } else {
-                                RCLCPP_ERROR(this->get_logger(), "Could not enable init mode");
-                            }
-                            break;
-                        }
-                    } else if (state_packet.device_id == device_id) {
-                        RCLCPP_INFO(this->get_logger(), "Device ID matched: %u", state_packet.device_id);
-                        RCLCPP_INFO(this->get_logger(), "Enabling init mode");
-                        device_ = device;
-                        res = protocol_->set_init_mode_enabled(true);
-                        if (res) {
-                            RCLCPP_INFO(this->get_logger(), "Init mode enabled");
-                            res = init_arm_controller();
-                            connection_log_occurred_ = false;
-
-                        } else {
-                            RCLCPP_ERROR(this->get_logger(), "Could not enable init mode");
-                        }
-                        break;
-                    } else {
-                        RCLCPP_ERROR(this->get_logger(), "Device ID did not match: %u", state_packet.device_id);
-                    }
-
-                } else {
-                    RCLCPP_ERROR(this->get_logger(), "Device state request could not be sent.");
-                }
-            }
-        }
-        if (!res) {
-            if (!connection_log_occurred_) {
-                RCLCPP_ERROR(this->get_logger(), "Device did not found");
-            }
-            connection_log_occurred_ = true;
-            protocol_->close();
-            return false;
-        }
-        return res;
-    }
 
     void enable_timers(bool enable) {
         if (enable) {
@@ -260,30 +178,78 @@ private:
         }
     }
 
-    bool communication_established_ = false;
-
-    void communication_loop() {
-        if (protocol_->is_open()) {
-            ManipulatorFeedbackPacket fb;
-            if (protocol_->receive_motor_feedback(&fb, std::chrono::milliseconds(1))) {
-                latest_feedback_ = fb;
+    void reconnect_device() {
+        if (!device_->is_open()) {
+            RCLCPP_WARN(this->get_logger(), "Device is not connected. Checking available ports:");
+            auto available_ports = device_->list_all_devices();
+            if (available_ports.empty()) {
+                RCLCPP_WARN(this->get_logger(), "No ports available");
+                return;
             }
-        } else {
-
-            if (communication_established_) {
-                RCLCPP_ERROR(this->get_logger(), "Device connection lost. Trying to reconnect to %s", device_.c_str());
-                communication_established_ = false;
-                for (size_t i = 0; i < joint_initial_positions_rads_.size(); i++) {
-                    joint_initial_positions_rads_[i] = manipulator_joint_states_.position[i];
+            for (const auto& port : available_ports) {
+                RCLCPP_INFO(this->get_logger(), "Trying to connect to %s", port.c_str());
+                if (device_->open(port)) {
+                    RCLCPP_INFO(this->get_logger(), "Connected to %s", port.c_str());
+                    return;
                 }
             }
+        } else {
+            try {
+                auto device_state = device_->receive_device_state(std::chrono::milliseconds(5));
+                if (device_state.device_is_init) {
+                    enable_timers(true);
+                } else {
+                    auto pkt = this->get_init_packet();
+                    if (device_->init_device(pkt, std::chrono::milliseconds(5))) {
+                        if (pkt.overwrite_pinout) {
+                            RCLCPP_INFO(this->get_logger(), "Overwritten Pinout:");
 
-            enable_timers(false);
+                            RCLCPP_INFO(this->get_logger(), "Joint Dir Pins: %d, %d, %d",
+                                (int) pkt.joint_dir_pins[0], (int) pkt.joint_dir_pins[1], (int) pkt.joint_dir_pins[2]);
+                            RCLCPP_INFO(this->get_logger(), "Joint Pul Pins: %d, %d, %d",
+                                (int) pkt.joint_pul_pins[0], (int) pkt.joint_pul_pins[1], (int) pkt.joint_pul_pins[2]);
 
-            bool res = connect_to_device(device_id_);
-            if (res) {
-                communication_established_ = true;
-                enable_timers(true);
+                            RCLCPP_INFO(this->get_logger(), "Gripper LPWM Pins: %d, %d, %d",
+                                (int) pkt.gripper_lpwm_pins[0], (int) pkt.gripper_lpwm_pins[1], (int) pkt.gripper_lpwm_pins[2]);
+                            RCLCPP_INFO(this->get_logger(), "Gripper RPWM Pins: %d, %d, %d",
+                                (int) pkt.gripper_rpwm_pins[0], (int) pkt.gripper_rpwm_pins[1], (int) pkt.gripper_rpwm_pins[2]);
+                        }
+
+                        RCLCPP_INFO(this->get_logger(), "Joint Directions: %s,%s,%s",
+                            pkt.joint_swap_dirs[0] ? "FL: Swapped " : "Not Swapped ",
+                            pkt.joint_swap_dirs[1] ? "FR: Swapped " : "Not Swapped ",
+                            pkt.joint_swap_dirs[2] ? "BR: Swapped " : "Not Swapped ");
+
+                        RCLCPP_INFO(this->get_logger(), "Gripper Directions: %s,%s,%s",
+                            pkt.gripper_swap_dirs[0] ? "FL: Swapped " : "Not Swapped ",
+                            pkt.gripper_swap_dirs[1] ? "FR: Swapped " : "Not Swapped ",
+                            pkt.gripper_swap_dirs[2] ? "BR: Swapped " : "Not Swapped ");
+
+                        RCLCPP_INFO(this->get_logger(), "Joint Initial Positions Steps: %d, %d, %d",
+                            (int) pkt.joint_initial_pos[0], (int) pkt.joint_initial_pos[1], (int) pkt.joint_initial_pos[2]);
+
+                        RCLCPP_INFO(this->get_logger(), "Joint Positions Boundaries : [%d, %d], [%d, %d], [%d, %d]",
+                            (int) pkt.min_joint_pos_boundaries[0], (int) pkt.max_joint_pos_boundaries[0],
+                            (int) pkt.min_joint_pos_boundaries[1], (int) pkt.max_joint_pos_boundaries[1],
+                            (int) pkt.min_joint_pos_boundaries[2], (int) pkt.max_joint_pos_boundaries[2]
+                        );
+
+                        RCLCPP_INFO(this->get_logger(), "Setted maximum Gripper PWM dutycycle: %f", pkt.max_dutycycle);
+                        RCLCPP_INFO(this->get_logger(), "Setted new velocity filter cutoff: %f Hz", pkt.lowpass_fc);
+
+                        RCLCPP_INFO(this->get_logger(), "Setted new Feed Forward Parameters: kv:%f, ka:%f, kj:%f", pkt.kv, pkt.ka, pkt.kj);
+                        RCLCPP_INFO(this->get_logger(), "Setted new PID parameters: kp:%f, ki:%f, kd:%f", pkt.kp, pkt.ki, pkt.kd);
+                        RCLCPP_INFO(this->get_logger(), "Setted new PID boundaries: p:%f, i:%f, d:%f", pkt.p_bound, pkt.i_bound, pkt.d_bound);
+
+                        RCLCPP_INFO(this->get_logger(), "Setted new motor control rate: %f Hz", pkt.control_hz);
+                        RCLCPP_INFO(this->get_logger(), "Setted new feedback rate: %f Hz", pkt.feedback_hz);
+                    } else {
+                        
+                    }
+                }
+            } catch (std::runtime_error& err) {
+                RCLCPP_WARN(this->get_logger(), "Device is disconnected\n");
+                enable_timers(false);
             }
         }
     }
@@ -317,7 +283,12 @@ private:
         rclcpp::Time current_time = this->get_clock()->now();
         prev_joint_states_time_ = current_time;
 
-        feedback_ = latest_feedback_;
+        try {
+            feedback_ = device_->receive_joint_feedback(std::chrono::milliseconds(1));
+        } catch (std::runtime_error& err) {
+            RCLCPP_WARN(this->get_logger(), "Could not receive joint feedbacks");
+        }
+
         std::vector<double> joint_positions_steps { feedback_.joint_positions, feedback_.joint_positions + 3 };
         std::vector<double> joint_velocities_steps { feedback_.joint_velocities, feedback_.joint_velocities + 3 };
 
@@ -380,7 +351,7 @@ private:
                 prev_velocities[i] = velocities[i];
             }
 
-            res &= protocol_->set_joint_velocities(velocities);
+            res &= device_->send_joint_velocities(velocities);
 
             prev_joint_trajectory_ = joint_trajectory_;
 
@@ -388,109 +359,55 @@ private:
                 static_cast<float>(gripper_duties[1]),
                 static_cast<float>(gripper_duties[2]) };
 
-            res &= protocol_->set_gripper_dutycycles(duties);
-            if (!res) {
+            res &= device_->send_gripper_dutycycles(duties);
+            /*if (!res) {
                 enable_timers(false);
-            }
+            }*/
         }
     }
 
+    manipulator::packets::InitPacket get_init_packet() {
+        manipulator::packets::InitPacket pkt {};
 
-    bool init_arm_controller() {
-        try {
+        pkt.overwrite_pinout = overwrite_pinout_ ? 1 : 0;
+        auto joint_initial_pos_steps = joint_rads_to_steps(joint_initial_positions_rads_);
+        auto joint_max_pos_boundaries_steps = joint_rads_to_steps(joint_max_pos_boundaries_rads_);
+        auto joint_min_pos_boundaries_steps = joint_rads_to_steps(joint_min_pos_boundaries_rads_);
 
-            ManipulatorInitPacket pkt {};
+        for (int i = 0; i < 3; i++) {
+            pkt.joint_dir_pins[i] = joint_dir_pins_[i];
+            pkt.joint_pul_pins[i] = joint_pul_pins_[i];
+            pkt.gripper_lpwm_pins[i] = gripper_lpwm_pins_[i];
+            pkt.gripper_rpwm_pins[i] = gripper_rpwm_pins_[i];
 
-            pkt.overwrite_pinout = overwrite_pinout_ ? 1 : 0;
-            auto joint_initial_pos_steps = joint_rads_to_steps(joint_initial_positions_rads_);
-            auto joint_max_pos_boundaries_steps = joint_rads_to_steps(joint_max_pos_boundaries_rads_);
-            auto joint_min_pos_boundaries_steps = joint_rads_to_steps(joint_min_pos_boundaries_rads_);
+            pkt.joint_swap_dirs[i] = joint_swap_dirs_[i];
+            pkt.gripper_swap_dirs[i] = gripper_swap_dirs_[i];
 
-            for (int i = 0; i < 3; i++) {
-                pkt.joint_dir_pins[i] = joint_dir_pins_[i];
-                pkt.joint_pul_pins[i] = joint_pul_pins_[i];
-                pkt.gripper_lpwm_pins[i] = gripper_lpwm_pins_[i];
-                pkt.gripper_rpwm_pins[i] = gripper_rpwm_pins_[i];
+            pkt.joint_initial_pos[i] = static_cast<int32_t>(lround(joint_initial_pos_steps[i]));
 
-                pkt.joint_swap_dirs[i] = joint_swap_dirs_[i];
-                pkt.gripper_swap_dirs[i] = gripper_swap_dirs_[i];
-
-                pkt.joint_initial_pos[i] = static_cast<int32_t>(lround(joint_initial_pos_steps[i]));
-
-                pkt.max_joint_pos_boundaries[i] = static_cast<int32_t>(lround(joint_max_pos_boundaries_steps[i]));
-                pkt.min_joint_pos_boundaries[i] = static_cast<int32_t>(lround(joint_min_pos_boundaries_steps[i]));
-            }
-
-            pkt.max_dutycycle = max_pwm_dutycycle_;
-            pkt.lowpass_fc = velocity_filter_cutoff_hz_;
-
-            pkt.kp = pid_kp_;
-            pkt.ki = pid_ki_;
-            pkt.kd = pid_kd_;
-
-            pkt.p_bound = pid_p_bound_;
-            pkt.i_bound = pid_i_bound_;
-            pkt.d_bound = pid_d_bound_;
-
-            pkt.kv = ff_kv_;
-            pkt.ka = ff_ka_;
-            pkt.kj = ff_kj_;
-
-            pkt.feedback_hz = feedback_rate_hz_;
-            pkt.control_hz = motor_control_rate_hz_;
-
-            if (!protocol_->send_init_packet(pkt)) {
-                return false;
-            }
-
-            if (pkt.overwrite_pinout) {
-                RCLCPP_INFO(this->get_logger(), "Overwritten Pinout:");
-
-                RCLCPP_INFO(this->get_logger(), "Joint Dir Pins: %d, %d, %d",
-                    (int) pkt.joint_dir_pins[0], (int) pkt.joint_dir_pins[1], (int) pkt.joint_dir_pins[2]);
-                RCLCPP_INFO(this->get_logger(), "Joint Pul Pins: %d, %d, %d",
-                    (int) pkt.joint_pul_pins[0], (int) pkt.joint_pul_pins[1], (int) pkt.joint_pul_pins[2]);
-
-                RCLCPP_INFO(this->get_logger(), "Gripper LPWM Pins: %d, %d, %d",
-                    (int) pkt.gripper_lpwm_pins[0], (int) pkt.gripper_lpwm_pins[1], (int) pkt.gripper_lpwm_pins[2]);
-                RCLCPP_INFO(this->get_logger(), "Gripper RPWM Pins: %d, %d, %d",
-                    (int) pkt.gripper_rpwm_pins[0], (int) pkt.gripper_rpwm_pins[1], (int) pkt.gripper_rpwm_pins[2]);
-            }
-
-            RCLCPP_INFO(this->get_logger(), "Joint Directions: %s,%s,%s",
-                pkt.joint_swap_dirs[0] ? "FL: Swapped " : "Not Swapped ",
-                pkt.joint_swap_dirs[1] ? "FR: Swapped " : "Not Swapped ",
-                pkt.joint_swap_dirs[2] ? "BR: Swapped " : "Not Swapped ");
-
-            RCLCPP_INFO(this->get_logger(), "Gripper Directions: %s,%s,%s",
-                pkt.gripper_swap_dirs[0] ? "FL: Swapped " : "Not Swapped ",
-                pkt.gripper_swap_dirs[1] ? "FR: Swapped " : "Not Swapped ",
-                pkt.gripper_swap_dirs[2] ? "BR: Swapped " : "Not Swapped ");
-
-            RCLCPP_INFO(this->get_logger(), "Joint Initial Positions Steps: %d, %d, %d",
-                (int) pkt.joint_initial_pos[0], (int) pkt.joint_initial_pos[1], (int) pkt.joint_initial_pos[2]);
-
-            RCLCPP_INFO(this->get_logger(), "Joint Positions Boundaries : [%d, %d], [%d, %d], [%d, %d]",
-                (int) pkt.min_joint_pos_boundaries[0], (int) pkt.max_joint_pos_boundaries[0],
-                (int) pkt.min_joint_pos_boundaries[1], (int) pkt.max_joint_pos_boundaries[1],
-                (int) pkt.min_joint_pos_boundaries[2], (int) pkt.max_joint_pos_boundaries[2]
-            );
-
-            RCLCPP_INFO(this->get_logger(), "Setted maximum Gripper PWM dutycycle: %f", pkt.max_dutycycle);
-            RCLCPP_INFO(this->get_logger(), "Setted new velocity filter cutoff: %f Hz", pkt.lowpass_fc);
-
-            RCLCPP_INFO(this->get_logger(), "Setted new Feed Forward Parameters: kv:%f, ka:%f, kj:%f", pkt.kv, pkt.ka, pkt.kj);
-            RCLCPP_INFO(this->get_logger(), "Setted new PID parameters: kp:%f, ki:%f, kd:%f", pkt.kp, pkt.ki, pkt.kd);
-            RCLCPP_INFO(this->get_logger(), "Setted new PID boundaries: p:%f, i:%f, d:%f", pkt.p_bound, pkt.i_bound, pkt.d_bound);
-
-            RCLCPP_INFO(this->get_logger(), "Setted new motor control rate: %f Hz", pkt.control_hz);
-            RCLCPP_INFO(this->get_logger(), "Setted new feedback rate: %f Hz", pkt.feedback_hz);
-
-            return true;
-        } catch (std::runtime_error& err) {
-            RCLCPP_ERROR(this->get_logger(), "Failed to initialize device");
-            return false;
+            pkt.max_joint_pos_boundaries[i] = static_cast<int32_t>(lround(joint_max_pos_boundaries_steps[i]));
+            pkt.min_joint_pos_boundaries[i] = static_cast<int32_t>(lround(joint_min_pos_boundaries_steps[i]));
         }
+
+        pkt.max_dutycycle = max_pwm_dutycycle_;
+        pkt.lowpass_fc = velocity_filter_cutoff_hz_;
+
+        pkt.kp = pid_kp_;
+        pkt.ki = pid_ki_;
+        pkt.kd = pid_kd_;
+
+        pkt.p_bound = pid_p_bound_;
+        pkt.i_bound = pid_i_bound_;
+        pkt.d_bound = pid_d_bound_;
+
+        pkt.kv = ff_kv_;
+        pkt.ka = ff_ka_;
+        pkt.kj = ff_kj_;
+
+        pkt.feedback_hz = feedback_rate_hz_;
+        pkt.control_hz = motor_control_rate_hz_;
+
+        return pkt;
     }
 
     void init_parameters() {
