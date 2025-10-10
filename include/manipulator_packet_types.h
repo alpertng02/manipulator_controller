@@ -13,7 +13,7 @@ extern "C" {
      * Constants
      * ============================== */
 
-#define MANIPULATOR_DEVICE_ID        (0x706F726EU)
+#define MANIPULATOR_DEVICE_ID        (0x706F726E)
 #define MANIPULATOR_JOINT_MOTOR_COUNT   (3u)
 #define MANIPULATOR_GRIPPER_MOTOR_COUNT (3u)
 

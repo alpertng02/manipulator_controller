@@ -70,9 +70,9 @@ public:
             throw std::runtime_error("Unsupported protocol");
         }
 
-        reconnection_timer_ = this->create_wall_timer(
+        device_connection_timer_ = this->create_wall_timer(
             std::chrono::duration<double, std::milli>(1000.0),
-            std::bind(&ManipulatorControlNode::reconnect_device, this));
+            std::bind(&ManipulatorControlNode::device_connection_callback, this));
 
     }
 private:
@@ -83,7 +83,7 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr jointStatePublisher_ {};
     rclcpp::TimerBase::SharedPtr joint_state_timer_ {};
     rclcpp::TimerBase::SharedPtr controller_timer_ {};
-    rclcpp::TimerBase::SharedPtr reconnection_timer_ {};
+    rclcpp::TimerBase::SharedPtr device_connection_timer_ {};
 
     sensor_msgs::msg::JointState manipulator_joint_states_ {};
 
@@ -145,8 +145,8 @@ private:
     double ff_kj_ { 0.000001 };
 
     double motor_control_rate_hz_ = 1000.0;
-    double feedback_rate_hz_ = 200.0;
-    double command_publish_rate_hz_ = 50.0;
+    double feedback_rate_hz_ = 50.0;
+    double command_publish_rate_hz_ = 200.0;
 
     double joint_trajectory_timeout_sec_ = 0.5;
 
@@ -178,78 +178,43 @@ private:
         }
     }
 
-    void reconnect_device() {
+    bool try_connect_device(std::chrono::milliseconds timeout) {
+
+        auto available_ports = device_->list_all_ports();
+
+        if (available_ports.empty()) {
+            RCLCPP_WARN(this->get_logger(), "No ports available");
+            return false;
+        }
+        RCLCPP_INFO(this->get_logger(), "Available ports:");
+        for (const auto& port : available_ports) {
+            RCLCPP_INFO(this->get_logger(), "\t%s\n", port.c_str());
+        }
+
+        for (const auto& port : available_ports) {
+            RCLCPP_INFO(this->get_logger(), "Trying to connect to port: %s", port.c_str());
+            if (!device_->open(port)) {
+                RCLCPP_INFO(this->get_logger(), "Port %s cannot open!", port.c_str());
+                continue;
+            }
+            RCLCPP_INFO(this->get_logger(), "Connected to port: %s", port.c_str());
+            RCLCPP_INFO(this->get_logger(), "Trying to initialize device...");
+            if (device_->init_device(this->get_init_packet(), timeout)) {
+                RCLCPP_INFO(this->get_logger(), "Device is initialized!");
+                return true;
+            } else {
+                RCLCPP_INFO(this->get_logger(), "Could not initialize device...");
+                device_->close();
+            }
+        }
+        return false;
+    }
+
+    void device_connection_callback() {
         if (!device_->is_open()) {
-            RCLCPP_WARN(this->get_logger(), "Device is not connected. Checking available ports:");
-            auto available_ports = device_->list_all_devices();
-            if (available_ports.empty()) {
-                RCLCPP_WARN(this->get_logger(), "No ports available");
-                return;
-            }
-            for (const auto& port : available_ports) {
-                RCLCPP_INFO(this->get_logger(), "Trying to connect to %s", port.c_str());
-                if (device_->open(port)) {
-                    RCLCPP_INFO(this->get_logger(), "Connected to %s", port.c_str());
-                    return;
-                }
-            }
-        } else {
-            try {
-                auto device_state = device_->receive_device_state(std::chrono::milliseconds(5));
-                if (device_state.device_is_init) {
-                    enable_timers(true);
-                } else {
-                    auto pkt = this->get_init_packet();
-                    if (device_->init_device(pkt, std::chrono::milliseconds(5))) {
-                        if (pkt.overwrite_pinout) {
-                            RCLCPP_INFO(this->get_logger(), "Overwritten Pinout:");
-
-                            RCLCPP_INFO(this->get_logger(), "Joint Dir Pins: %d, %d, %d",
-                                (int) pkt.joint_dir_pins[0], (int) pkt.joint_dir_pins[1], (int) pkt.joint_dir_pins[2]);
-                            RCLCPP_INFO(this->get_logger(), "Joint Pul Pins: %d, %d, %d",
-                                (int) pkt.joint_pul_pins[0], (int) pkt.joint_pul_pins[1], (int) pkt.joint_pul_pins[2]);
-
-                            RCLCPP_INFO(this->get_logger(), "Gripper LPWM Pins: %d, %d, %d",
-                                (int) pkt.gripper_lpwm_pins[0], (int) pkt.gripper_lpwm_pins[1], (int) pkt.gripper_lpwm_pins[2]);
-                            RCLCPP_INFO(this->get_logger(), "Gripper RPWM Pins: %d, %d, %d",
-                                (int) pkt.gripper_rpwm_pins[0], (int) pkt.gripper_rpwm_pins[1], (int) pkt.gripper_rpwm_pins[2]);
-                        }
-
-                        RCLCPP_INFO(this->get_logger(), "Joint Directions: %s,%s,%s",
-                            pkt.joint_swap_dirs[0] ? "FL: Swapped " : "Not Swapped ",
-                            pkt.joint_swap_dirs[1] ? "FR: Swapped " : "Not Swapped ",
-                            pkt.joint_swap_dirs[2] ? "BR: Swapped " : "Not Swapped ");
-
-                        RCLCPP_INFO(this->get_logger(), "Gripper Directions: %s,%s,%s",
-                            pkt.gripper_swap_dirs[0] ? "FL: Swapped " : "Not Swapped ",
-                            pkt.gripper_swap_dirs[1] ? "FR: Swapped " : "Not Swapped ",
-                            pkt.gripper_swap_dirs[2] ? "BR: Swapped " : "Not Swapped ");
-
-                        RCLCPP_INFO(this->get_logger(), "Joint Initial Positions Steps: %d, %d, %d",
-                            (int) pkt.joint_initial_pos[0], (int) pkt.joint_initial_pos[1], (int) pkt.joint_initial_pos[2]);
-
-                        RCLCPP_INFO(this->get_logger(), "Joint Positions Boundaries : [%d, %d], [%d, %d], [%d, %d]",
-                            (int) pkt.min_joint_pos_boundaries[0], (int) pkt.max_joint_pos_boundaries[0],
-                            (int) pkt.min_joint_pos_boundaries[1], (int) pkt.max_joint_pos_boundaries[1],
-                            (int) pkt.min_joint_pos_boundaries[2], (int) pkt.max_joint_pos_boundaries[2]
-                        );
-
-                        RCLCPP_INFO(this->get_logger(), "Setted maximum Gripper PWM dutycycle: %f", pkt.max_dutycycle);
-                        RCLCPP_INFO(this->get_logger(), "Setted new velocity filter cutoff: %f Hz", pkt.lowpass_fc);
-
-                        RCLCPP_INFO(this->get_logger(), "Setted new Feed Forward Parameters: kv:%f, ka:%f, kj:%f", pkt.kv, pkt.ka, pkt.kj);
-                        RCLCPP_INFO(this->get_logger(), "Setted new PID parameters: kp:%f, ki:%f, kd:%f", pkt.kp, pkt.ki, pkt.kd);
-                        RCLCPP_INFO(this->get_logger(), "Setted new PID boundaries: p:%f, i:%f, d:%f", pkt.p_bound, pkt.i_bound, pkt.d_bound);
-
-                        RCLCPP_INFO(this->get_logger(), "Setted new motor control rate: %f Hz", pkt.control_hz);
-                        RCLCPP_INFO(this->get_logger(), "Setted new feedback rate: %f Hz", pkt.feedback_hz);
-                    } else {
-                        
-                    }
-                }
-            } catch (std::runtime_error& err) {
-                RCLCPP_WARN(this->get_logger(), "Device is disconnected\n");
-                enable_timers(false);
+            enable_timers(false);
+            if (try_connect_device(std::chrono::milliseconds(100))) {
+                enable_timers(true);
             }
         }
     }
@@ -284,25 +249,25 @@ private:
         prev_joint_states_time_ = current_time;
 
         try {
-            feedback_ = device_->receive_joint_feedback(std::chrono::milliseconds(1));
+            feedback_ = device_->receive_joint_feedback(std::chrono::milliseconds(1)).feedback;
+
+            std::vector<double> joint_positions_steps { feedback_.joint_positions, feedback_.joint_positions + 3 };
+            std::vector<double> joint_velocities_steps { feedback_.joint_velocities, feedback_.joint_velocities + 3 };
+
+            std::vector<double> joint_positions_rads { joint_steps_to_rads(joint_positions_steps) };
+            std::vector<double> joint_velocities_rads { joint_steps_to_rads(joint_velocities_steps) };
+
+            manipulator_joint_states_.header.frame_id = base_frame_id_;
+            manipulator_joint_states_.header.stamp = current_time;
+            for (size_t i = 0; i < 3; i++) {
+                manipulator_joint_states_.velocity[i] = joint_velocities_rads[i];
+                manipulator_joint_states_.position[i] = joint_positions_rads[i];
+                manipulator_joint_states_.velocity[i + 3] = feedback_.gripper_pwm_duties[i];
+            }
+            jointStatePublisher_->publish(manipulator_joint_states_);
         } catch (std::runtime_error& err) {
             RCLCPP_WARN(this->get_logger(), "Could not receive joint feedbacks");
         }
-
-        std::vector<double> joint_positions_steps { feedback_.joint_positions, feedback_.joint_positions + 3 };
-        std::vector<double> joint_velocities_steps { feedback_.joint_velocities, feedback_.joint_velocities + 3 };
-
-        std::vector<double> joint_positions_rads { joint_steps_to_rads(joint_positions_steps) };
-        std::vector<double> joint_velocities_rads { joint_steps_to_rads(joint_velocities_steps) };
-
-        manipulator_joint_states_.header.frame_id = base_frame_id_;
-        manipulator_joint_states_.header.stamp = current_time;
-        for (size_t i = 0; i < 3; i++) {
-            manipulator_joint_states_.velocity[i] = joint_velocities_rads[i];
-            manipulator_joint_states_.position[i] = joint_positions_rads[i];
-            manipulator_joint_states_.velocity[i + 3] = feedback_.gripper_pwm_duties[i];
-        }
-        jointStatePublisher_->publish(manipulator_joint_states_);
 
     }
 
@@ -315,13 +280,12 @@ private:
         const auto& point = joint_trajectory_.points[0];
         if ((current_time - prev_joint_trajectory_time_).seconds() < joint_trajectory_timeout_sec_) {
             if (point.velocities.size() < manipulator_joint_states_.name.size()) {
+                RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "Trajectory has insufficient velocity components");
                 return;
             }
 
             std::vector<double> joint_velocities_rads { point.velocities.begin(), point.velocities.begin() + 3 };
             std::vector<double> joint_velocities_steps { joint_rads_to_steps(joint_velocities_rads) };
-            std::vector<double> joint_accelerations_rads { point.accelerations.begin(), point.accelerations.begin() + 3 };
-            std::vector<double> joint_accelerations_steps { joint_rads_to_steps(joint_accelerations_rads) };
 
             std::vector<double> gripper_duties { point.velocities.begin() + 3, point.velocities.begin() + 6 };
             // Only send command if we have 3 joints
@@ -331,13 +295,17 @@ private:
                 static_cast<float>(joint_velocities_steps[1]),
                 static_cast<float>(joint_velocities_steps[2]) };
 
+            if (point.accelerations.size() >= MANIPULATOR_JOINT_MOTOR_COUNT) {
 
-            for (size_t i = 0; i < joint_accelerations_steps.size(); i++) {
-                double max_velocity_change = joint_accelerations_steps[i] / command_publish_rate_hz_;
-                if (velocities[i] > prev_velocities[i] + max_velocity_change) {
-                    velocities[i] = prev_velocities[i] + max_velocity_change;
-                } else if (velocities[i] < prev_velocities[i] - max_velocity_change) {
-                    velocities[i] = prev_velocities[i] - max_velocity_change;
+                std::vector<double> joint_accelerations_rads { point.accelerations.begin(), point.accelerations.begin() + 3 };
+                std::vector<double> joint_accelerations_steps { joint_rads_to_steps(joint_accelerations_rads) };
+                for (size_t i = 0; i < joint_accelerations_steps.size(); i++) {
+                    double max_velocity_change = joint_accelerations_steps[i] / command_publish_rate_hz_;
+                    if (velocities[i] > prev_velocities[i] + max_velocity_change) {
+                        velocities[i] = prev_velocities[i] + max_velocity_change;
+                    } else if (velocities[i] < prev_velocities[i] - max_velocity_change) {
+                        velocities[i] = prev_velocities[i] - max_velocity_change;
+                    }
                 }
             }
 
@@ -360,9 +328,9 @@ private:
                 static_cast<float>(gripper_duties[2]) };
 
             res &= device_->send_gripper_dutycycles(duties);
-            /*if (!res) {
+            if (!res) {
                 enable_timers(false);
-            }*/
+            }
         }
     }
 

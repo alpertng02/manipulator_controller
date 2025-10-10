@@ -29,7 +29,7 @@ bool UsbManipulatorDevice::is_open() {
     return serial_.isDeviceOpen() && is_open_;
 }
 
-std::vector<std::string> UsbManipulatorDevice::list_all_devices() {
+std::vector<std::string> UsbManipulatorDevice::list_all_ports() {
     std::vector<std::string> all_devices {};
 
     char device_name[32] = { 0 };

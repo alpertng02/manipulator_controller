@@ -26,6 +26,16 @@ struct Packet {
     std::vector<uint8_t> payload;
 };
 
+struct FeedbackPacket {
+    Header header;
+    Feedback feedback;
+};
+
+struct DeviceStatePacket {
+    Header header;
+    DeviceState state;
+};
+
 // Packing
 
 std::vector<uint8_t> pack_joint_velocities(const std::array<float, k_joint_motor_count>& velocities,
@@ -48,6 +58,9 @@ std::vector<uint8_t> pack_request_feedback(uint64_t time_since_boot_us);
 std::vector<uint8_t> pack_init_packet(const InitPacket& init, uint64_t time_since_boot_us);
 
 std::vector<uint8_t> pack_init_mode_enable(const bool enable, uint64_t time_since_boot_us);
+
+std::vector<uint8_t> pack_running_mode_enable(const bool enable, uint64_t time_since_boot_us);
+
 
 // Unpacking
 

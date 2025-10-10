@@ -396,18 +396,20 @@ bool manipulator_unpack_packet_header(const uint8_t* buf, size_t buf_size, Manip
     uint16_t content_size = le16toh(hdr.content_size);
 
     size_t expected_total_size = manipulator_packet_header_size() + content_size;
-    if (buf_size < expected_total_size)
-        return false; // incomplete packet
 
     // Zero out the CRC field for verification
     ManipulatorPacketHeader temp_hdr = hdr;
     temp_hdr.crc32 = 0;
-    memcpy((void*) buf, &temp_hdr, sizeof(temp_hdr)); // ⚠️ Only if buf is mutable (else use local copy)
 
-    uint32_t crc_calc = manipulator_crc32(buf, expected_total_size - sizeof(hdr.crc32));
+    uint8_t temp_buf[sizeof(ManipulatorPacketHeader)] = { 0 };
+    memcpy((void*) temp_buf, &temp_hdr, sizeof(temp_hdr)); 
 
-    if (crc_calc != crc_recv)
-        return false; // CRC mismatch
+    if (buf_size > expected_total_size) {
+
+        uint32_t crc_calc = manipulator_crc32(temp_buf, expected_total_size - sizeof(hdr.crc32));
+        if (crc_calc != crc_recv)
+            return false; // CRC mismatch
+    }
 
     if (out_header) {
         hdr.device_id = le32toh(hdr.device_id);

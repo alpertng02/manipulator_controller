@@ -94,6 +94,19 @@ std::vector<uint8_t> manipulator::packets::pack_device_state(const DeviceState& 
     return buffer;
 }
 
+std::vector<uint8_t> manipulator::packets::pack_running_mode_enable(const bool enable, uint64_t time_since_boot_us) {
+    std::vector<uint8_t> buffer(
+        manipulator_packet_enable_size(), 0);
+
+    if (!manipulator_pack_enable_packet(buffer.data(), buffer.size(),
+        time_since_boot_us, manipulator::packets::Commands::running_mode_enable, enable))
+    {
+        throw std::runtime_error("pack_running_mode_enable: packet packing failed");
+    }
+
+    return buffer;
+}
+
 std::vector<uint8_t> manipulator::packets::pack_init_mode_enable(const bool enable, uint64_t time_since_boot_us) {
     std::vector<uint8_t> buffer(
         manipulator_packet_enable_size(), 0);

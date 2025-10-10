@@ -11,7 +11,7 @@ public:
 
     bool open(const std::string& port) override;
 
-    std::vector<std::string> list_all_devices() override;
+    std::vector<std::string> list_all_ports() override;
 
     bool is_open() override;
 

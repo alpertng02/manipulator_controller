@@ -15,7 +15,7 @@ public:
 
     virtual bool is_open() = 0;
 
-    virtual std::vector<std::string> list_all_devices() = 0;
+    virtual std::vector<std::string> list_all_ports() = 0;
 
     virtual void close() = 0;
 
@@ -28,12 +28,14 @@ public:
     virtual bool send_init_packet(const manipulator::packets::InitPacket& init_packet);
 
     virtual bool send_init_mode_enable(const bool enable);
-
+    
+    bool send_running_mode_enable(const bool enable);
+    
     virtual std::vector<uint8_t> receive_packet(std::chrono::milliseconds timeout);
 
-    virtual manipulator::packets::Feedback receive_joint_feedback(std::chrono::milliseconds timeout);
+    virtual manipulator::packets::FeedbackPacket receive_joint_feedback(std::chrono::milliseconds timeout);
 
-    virtual manipulator::packets::DeviceState receive_device_state(std::chrono::milliseconds timeout);
+    virtual manipulator::packets::DeviceStatePacket receive_device_state(std::chrono::milliseconds timeout);
 
     virtual ~IManipulatorDevice() = 0;
 
