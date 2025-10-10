@@ -183,27 +183,27 @@ private:
         auto available_ports = device_->list_all_ports();
 
         if (available_ports.empty()) {
-            RCLCPP_WARN(this->get_logger(), "No ports available");
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *get_clock(), 5000, "No ports available");
             return false;
         }
-        RCLCPP_INFO(this->get_logger(), "Available ports:");
+        RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 5000, "Available ports:");
         for (const auto& port : available_ports) {
-            RCLCPP_INFO(this->get_logger(), "\t%s\n", port.c_str());
+            RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 5000, "\t%s\n", port.c_str());
         }
 
         for (const auto& port : available_ports) {
-            RCLCPP_INFO(this->get_logger(), "Trying to connect to port: %s", port.c_str());
+            RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 5000, "Trying to connect to port: %s", port.c_str());
             if (!device_->open(port)) {
-                RCLCPP_INFO(this->get_logger(), "Port %s cannot open!", port.c_str());
+                RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 5000, "Port %s cannot open!", port.c_str());
                 continue;
             }
-            RCLCPP_INFO(this->get_logger(), "Connected to port: %s", port.c_str());
-            RCLCPP_INFO(this->get_logger(), "Trying to initialize device...");
+            RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 5000, "Connected to port: %s", port.c_str());
+            RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 5000, "Trying to initialize device...");
             if (device_->init_device(this->get_init_packet(), timeout)) {
-                RCLCPP_INFO(this->get_logger(), "Device is initialized!");
+                RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 5000, "Device is initialized!");
                 return true;
             } else {
-                RCLCPP_INFO(this->get_logger(), "Could not initialize device...");
+                RCLCPP_INFO_THROTTLE(this->get_logger(), *get_clock(), 5000, "Could not initialize device...");
                 device_->close();
             }
         }
@@ -212,8 +212,10 @@ private:
 
     void device_connection_callback() {
         if (!device_->is_open()) {
+            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000, "Device Disconnected");
             enable_timers(false);
-            if (try_connect_device(std::chrono::milliseconds(100))) {
+            if (try_connect_device(std::chrono::milliseconds(200))) {
+                RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000, "Device Connected");
                 enable_timers(true);
             }
         }
@@ -249,7 +251,7 @@ private:
         prev_joint_states_time_ = current_time;
 
         try {
-            feedback_ = device_->receive_joint_feedback(std::chrono::milliseconds(1)).feedback;
+            feedback_ = device_->receive_joint_feedback(std::chrono::milliseconds(5)).feedback;
 
             std::vector<double> joint_positions_steps { feedback_.joint_positions, feedback_.joint_positions + 3 };
             std::vector<double> joint_velocities_steps { feedback_.joint_velocities, feedback_.joint_velocities + 3 };
@@ -262,6 +264,7 @@ private:
             for (size_t i = 0; i < 3; i++) {
                 manipulator_joint_states_.velocity[i] = joint_velocities_rads[i];
                 manipulator_joint_states_.position[i] = joint_positions_rads[i];
+                joint_initial_positions_rads_[i] = joint_positions_rads[i];
                 manipulator_joint_states_.velocity[i + 3] = feedback_.gripper_pwm_duties[i];
             }
             jointStatePublisher_->publish(manipulator_joint_states_);
