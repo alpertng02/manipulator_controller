@@ -1,7 +1,6 @@
 manipulator_controller:
   ros__parameters:
     protocol: "usb"
-    device_id: 1701538158
 
     command_publish_rate: 200.0
     feedback_rate: 50.0

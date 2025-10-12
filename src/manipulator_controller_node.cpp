@@ -146,8 +146,6 @@ private:
 
     double joint_trajectory_timeout_sec_ = 0.5;
 
-    int64_t device_id_ { MANIPULATOR_DEVICE_ID };
-
     rclcpp::Time prev_joint_trajectory_time_ { this->get_clock()->now() };
     rclcpp::Time prev_joint_states_time_ { this->get_clock()->now() };
     trajectory_msgs::msg::JointTrajectory joint_trajectory_;
@@ -378,7 +376,6 @@ private:
     void init_parameters() {
 
         protocol_type_ = this->declare_parameter("protocol", protocol_type_);
-        device_id_ = this->declare_parameter("device_id", device_id_);
 
         command_publish_rate_hz_ = this->declare_parameter("command_publish_rate", command_publish_rate_hz_);
         feedback_rate_hz_ = this->declare_parameter("feedback_rate", feedback_rate_hz_);
