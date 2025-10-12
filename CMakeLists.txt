@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.8)
 project(manipulator_controller)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic)
+  add_compile_options(-Wall -Wextra)
 endif()
 
 # find dependencies
@@ -17,9 +17,12 @@ find_package(trajectory_msgs REQUIRED)
 
 add_executable(manipulator_controller 
   src/manipulator_controller_node.cpp
-  src/icommunication_protocol.cpp
+  src/imanipulator_device.cpp
   src/serialib.cpp 
-  src/usb_protocol.cpp)
+  src/usb_device.cpp
+  src/manipulator_packets.c
+  src/manipulator_packets.cpp
+  )
 target_include_directories(manipulator_controller PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)

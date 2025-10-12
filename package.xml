@@ -4,13 +4,17 @@
   <name>manipulator_controller</name>
   <version>0.0.0</version>
   <description>TODO: Package description</description>
-  <maintainer email="alpertunga2003@gmail.com">alper</maintainer>
+  <maintainer email="alpert.guven@gmail.com">alper</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
+
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>trajectory_msgs</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
