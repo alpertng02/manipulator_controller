@@ -71,7 +71,7 @@ public:
         }
 
         device_connection_timer_ = this->create_wall_timer(
-            std::chrono::duration<double, std::milli>(1000.0),
+            std::chrono::duration<double, std::milli>(1000.0 * reconnection_retry_period_sec_),
             std::bind(&ManipulatorControlNode::device_connection_callback, this));
 
     }
@@ -110,11 +110,6 @@ private:
     std::vector<double> joint_steps_per_revolutions_ { 20000.0, 12800.0, 51200.0 };
     static constexpr double stepper_max_velocity_steps_ { 200000.0 };
 
-    double joint_deacceleration_ratio_ { 0.8f };
-
-    std::vector<double> joint_max_acc_jerks_rads_ { 10.0f, 10.0f, 10.0f };
-    std::vector<double> joint_max_dec_jerks_rads_ { 8.0f, 8.0f, 8.0f };
-
     std::vector<double> wheel_encoder_velocities_steps_sec {
         0.0, 0.0, 0.0, 0.0
     };
@@ -147,15 +142,14 @@ private:
     double motor_control_rate_hz_ = 1000.0;
     double feedback_rate_hz_ = 50.0;
     double command_publish_rate_hz_ = 200.0;
+    double reconnection_retry_period_sec_ = 1.0;
 
     double joint_trajectory_timeout_sec_ = 0.5;
 
     int64_t device_id_ { MANIPULATOR_DEVICE_ID };
-    std::string device_bus_ { "/dev/ttyACM0" };
 
     rclcpp::Time prev_joint_trajectory_time_ { this->get_clock()->now() };
     rclcpp::Time prev_joint_states_time_ { this->get_clock()->now() };
-    rclcpp::Time prev_log_time_ { this->get_clock()->now() };
     trajectory_msgs::msg::JointTrajectory joint_trajectory_;
     trajectory_msgs::msg::JointTrajectory prev_joint_trajectory_;
 
@@ -390,6 +384,8 @@ private:
         feedback_rate_hz_ = this->declare_parameter("feedback_rate", feedback_rate_hz_);
         motor_control_rate_hz_ = this->declare_parameter("motor_control_rate", motor_control_rate_hz_);
 
+        reconnection_retry_period_sec_ = this->declare_parameter("reconnection_retry_period", reconnection_retry_period_sec_);
+
         joint_trajectory_topic_ = this->declare_parameter("joint_trajectory_topic", joint_trajectory_topic_);
         joint_states_topic_ = this->declare_parameter("joint_states_topic", joint_states_topic_);
 
@@ -425,11 +421,6 @@ private:
 
         joint_reductions_ = this->declare_parameter("joint_reductions", joint_reductions_);
         joint_steps_per_revolutions_ = this->declare_parameter("joint_steps_per_revolutions", joint_steps_per_revolutions_);
-
-        joint_deacceleration_ratio_ = this->declare_parameter("joint_deacceleration_ratio", joint_deacceleration_ratio_);
-
-        joint_max_acc_jerks_rads_ = this->declare_parameter("joint_max_acc_jerks", joint_max_acc_jerks_rads_);
-        joint_max_dec_jerks_rads_ = this->declare_parameter("joint_max_dec_jerks", joint_max_dec_jerks_rads_);
 
         base_frame_id_ = this->declare_parameter("base_frame_id", base_frame_id_);
 
