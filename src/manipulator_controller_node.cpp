@@ -95,8 +95,8 @@ private:
     bool overwrite_pinout_ { true };
     std::vector<int64_t> joint_dir_pins_ { 3, 7, 9 };
     std::vector<int64_t> joint_pul_pins_ { 2, 6, 8 };
-    std::vector<int64_t> gripper_lpwm_pins_ { 14, 10, 12 };
-    std::vector<int64_t> gripper_rpwm_pins_ { 15, 11, 13 };
+    std::vector<int64_t> gripper_lpwm_pins_ { 14, 12, 10 };
+    std::vector<int64_t> gripper_rpwm_pins_ { 15, 13, 11 };
 
     std::vector<int64_t> joint_swap_dirs_ { 0, 0, 0 };
     std::vector<int64_t> gripper_swap_dirs_ { 0, 0, 0 };
@@ -124,7 +124,7 @@ private:
     };
     std::string base_frame_id_ { "base_link" };
 
-    double max_pwm_dutycycle_ { 80.0 };
+    double max_pwm_dutycycle_ { 100.0 };
     double velocity_filter_cutoff_hz_ { 100.0 };
 
     double pid_kp_ { 0.0 };
@@ -141,7 +141,7 @@ private:
 
     double motor_control_rate_hz_ = 1000.0;
     double feedback_rate_hz_ = 50.0;
-    double command_publish_rate_hz_ = 200.0;
+    double command_publish_rate_hz_ = 60.0;
     double reconnection_retry_period_sec_ = 1.0;
 
     double joint_trajectory_timeout_sec_ = 0.5;
